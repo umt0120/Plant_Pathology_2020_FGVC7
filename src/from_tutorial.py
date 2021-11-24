@@ -17,19 +17,23 @@ import copy
 import logging
 from tqdm import tqdm
 from sklearn.preprocessing import LabelEncoder
-from torch.utils.data import DataLoader,Dataset
+from sklearn.metrics import classification_report, confusion_matrix
+from torch.utils.data import DataLoader, Dataset
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data.sampler import SubsetRandomSampler
 import pandas as pd
+
 tqdm.pandas()
 import datetime
 
-plt.ion()   # interactive mode
+plt.ion()  # interactive mode
 
 logging.basicConfig(
     level=logging.INFO,
     handlers=[
-        logging.FileHandler(os.path.join(str("logs", datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat()) + ".log")),
+        logging.FileHandler(os.path.join(
+            str("logs", datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat()) + ".log")),
         logging.StreamHandler()
     ]
 )
@@ -66,8 +70,9 @@ class ImageTransform:
             ),
         }
 
-    def __call__(self, img, phase = "train") -> None:
+    def __call__(self, img, phase="train") -> None:
         return self.data_transform[phase](img)
+
 
 class PlantDataset(Dataset):
     def __init__(self, csv, transformer=None, phase="train"):
@@ -102,7 +107,7 @@ def train_model(model, dataloaders, dataset_sizes, device, criterion, optimizer,
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
-                model.eval()   # Set model to evaluate mode
+                model.eval()  # Set model to evaluate mode
 
             running_loss = 0.0
             running_corrects = 0
@@ -144,7 +149,6 @@ def train_model(model, dataloaders, dataset_sizes, device, criterion, optimizer,
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
 
-
     time_elapsed = time.time() - since
     logger.info('Training complete in {:.0f}m {:.0f}s'.format(
         time_elapsed // 60, time_elapsed % 60))
@@ -153,6 +157,36 @@ def train_model(model, dataloaders, dataset_sizes, device, criterion, optimizer,
     # load best model weights
     model.load_state_dict(best_model_wts)
     return model
+
+
+def predict(model, dataloader, class_names):
+    model.eval()
+
+    pred = []
+    Y = []
+    probabilities = None
+    for i, (inputs, labels) in enumerate(dataloader):
+
+        with torch.no_grad():
+            output = model(inputs)
+
+        # softmaxの計算を行う
+        softmax_num = F.softmax(output, dim=1)
+
+        p = [int(l.argmax()) for l in softmax_num]
+        pred += p
+        if probabilities is None:
+            probabilities = softmax_num
+        else:
+            probabilities = torch.cat([probabilities, softmax_num], dim=0)
+
+        ly = [int(l) for l in labels]
+        Y += ly
+
+    report = classification_report(Y, pred, target_names=class_names)
+    logger.info(report)
+    cm = confusion_matrix(Y, pred, target_names=class_names)
+    logger.info(cm)
 
 
 def imshow(inp, out, title=None):
@@ -185,7 +219,7 @@ def visualize_model(model, dataloaders, class_names, device, out_dir, num_images
 
             for j in range(inputs.size()[0]):
                 images_so_far += 1
-                ax = plt.subplot(num_images//2, 2, images_so_far)
+                ax = plt.subplot(num_images // 2, 2, images_so_far)
                 ax.axis('off')
                 title = f'label: {class_names[labels[j].int()]}, predicted: {class_names[preds[j]]}'
                 ax.set_title(title)
@@ -197,8 +231,8 @@ def visualize_model(model, dataloaders, class_names, device, out_dir, num_images
                     return
         model.train(mode=was_training)
 
-def main():
 
+def main():
     size = 224
     mean = (0.485, 0.456, 0.406)
     std = (0.229, 0.224, 0.225)
@@ -223,9 +257,11 @@ def main():
     test_size = int(0.1 * root_size)
     val_size = int(0.3 * (root_size - test_size))
     train_size = root_size - val_size - test_size
-    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(root_dataset, [train_size, val_size,test_size])
+    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(root_dataset,
+                                                                             [train_size, val_size, test_size])
     dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset), "test": len(test_dataset)}
-    logger.info(f"length of each datasets => train:[{len(train_dataset)}], val:[{len(val_dataset)}], test[{len(test_dataset)}]")
+    logger.info(
+        f"length of each datasets => train:[{len(train_dataset)}], val:[{len(val_dataset)}], test[{len(test_dataset)}]")
 
     # phaseの設定（trainのみデータ拡張を行う）
     train_dataset.phase = "train"
@@ -236,8 +272,8 @@ def main():
 
     # Dataloaderの設定
     dataloaders = {
-        "train":  torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4),
-        "val":  torch.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
+        "train": torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4),
+        "val": torch.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
     }
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -258,9 +294,11 @@ def main():
     # Decay LR by a factor of 0.1 every 7 epochs
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
 
-    model_ft = train_model(model_ft, dataloaders, dataset_sizes, device, criterion, optimizer_ft, exp_lr_scheduler, num_epochs=25)
+    model_ft = train_model(model_ft, dataloaders, dataset_sizes, device, criterion, optimizer_ft, exp_lr_scheduler,
+                           num_epochs=25)
     visualize_model(model_ft, dataloaders, class_names, device, "out")
-    model_ft_path = os.path.join("model", "model_ft_" + str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat()) + ".pth")
+    model_ft_path = os.path.join("model", "model_ft_" + str(
+        datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat()) + ".pth")
     torch.save(model_ft.state_dict(), model_ft_path)
 
     model_conv = torchvision.models.resnet18(pretrained=True)
@@ -282,9 +320,11 @@ def main():
     # Decay LR by a factor of 0.1 every 7 epochs
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_conv, step_size=7, gamma=0.1)
 
-    model_conv = train_model(model_conv, dataloaders, dataset_sizes, device, criterion, optimizer_conv, exp_lr_scheduler, num_epochs=25)
+    model_conv = train_model(model_conv, dataloaders, dataset_sizes, device, criterion, optimizer_conv,
+                             exp_lr_scheduler, num_epochs=25)
     visualize_model(model_conv, dataloaders, class_names, device, "out")
-    model_conv_path = os.path.join("model", "model_conv_" + str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat()) + ".pth")
+    model_conv_path = os.path.join("model", "model_conv_" + str(
+        datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat()) + ".pth")
     torch.save(model_conv.state_dict(), model_conv_path)
 
     plt.ioff()
